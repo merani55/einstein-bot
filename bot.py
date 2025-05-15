@@ -1,10 +1,9 @@
-import telebot
-import os
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+
 import re
 
-TOKEN = os.getenv("BOT_TOKEN")
-bot = telebot.TeleBot(TOKEN)
-
+# Завдання квесту
 QUEST = [
     {
         "task": ("У темряві світло ховається за трьома кроками назад.\n"
@@ -44,7 +43,7 @@ QUEST = [
     },
     {
         "task": ("Уяви оцінки з латини та грецької, які в Ейнштейна були найгіршими.\n"
-                 "Які це були? Відповідь у форматі: 'латина, грецька' (у нижньому регістрі)."),
+                 "Які це були? Відповідь у форматі: '5, 5' (цифрами, через кому)."),
         "answer": "5, 5",
         "hint": ("Не всі науки підкорялись генію, "
                  "але це допомогло йому розвивати інші таланти."),
@@ -65,72 +64,99 @@ QUEST = [
     },
 ]
 
-user_state = {}
-user_hints_requested = {}
-
+# Функція нормалізації відповіді (прибирає пробіли, великі букви, знаки пунктуації)
 def normalize(text):
     text = text.lower()
-    text = text.strip()
-    text = re.sub(r'[^\w\sа-яіїєґ]', '', text)  # Прибрати всі небуквено-цифрові символи, крім кирилиці
-    text = text.replace("ё", "е")  # Для російської, на всяк випадок
-    text = text.replace("ї", "і")  # Замінити для уніфікації
-    text = text.replace("й", "і")
-    return text
+    text = re.sub(r'[^\wа-яґєії0-9]', '', text)  # Латиниця, кирилиця, цифри, без знаків
+    return text.strip()
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    chat_id = message.chat.id
-    user_state[chat_id] = 0
-    user_hints_requested[chat_id] = False
-    bot.send_message(chat_id, "Ласкаво просимо в квест ‘Код Ейнштейна’! Напиши 'Почати', щоб почати.")
+# Збереження прогресу користувачів у пам'яті (у продакшені варто використовувати базу)
+user_progress = {}
 
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    chat_id = message.chat.id
-    step = user_state.get(chat_id, 0)
-    hint_requested = user_hints_requested.get(chat_id, False)
-    
-    if step >= len(QUEST):
-        bot.send_message(chat_id, "Квест завершено! Дякуємо за участь.")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_progress[user_id] = {"step": 0, "asked_hint": False}
+    await update.message.reply_text(
+        "Ласкаво просимо в квест ‘Код Ейнштейна’! Напиши 'Почати', щоб розпочати."
+    )
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text.lower()
+
+    if user_id not in user_progress:
+        user_progress[user_id] = {"step": 0, "asked_hint": False}
+
+    step = user_progress[user_id]["step"]
+
+    if text == "почати" and step == 0:
+        # Показати перше завдання
+        await update.message.reply_text(QUEST[0]["task"])
+        user_progress[user_id]["step"] = 1
+        user_progress[user_id]["asked_hint"] = False
         return
-    
+
+    # Якщо користувач просить підказку
+    if text == "підказка":
+        if step == 0:
+            await update.message.reply_text("Спочатку напиши 'Почати', щоб розпочати квест.")
+            return
+        elif step > len(QUEST):
+            await update.message.reply_text("Квест вже завершено.")
+            return
+        else:
+            if not user_progress[user_id]["asked_hint"]:
+                await update.message.reply_text(QUEST[step-1]["hint"])
+                user_progress[user_id]["asked_hint"] = True
+            else:
+                await update.message.reply_text("Підказка вже була надана.")
+            return
+
+    # Якщо квест завершено
     if step == 0:
-        if message.text.lower() == "почати":
-            bot.send_message(chat_id, QUEST[step]["task"])
-            user_state[chat_id] = 1
-            user_hints_requested[chat_id] = False
-        else:
-            bot.send_message(chat_id, "Напиши 'Почати', щоб розпочати квест.")
+        await update.message.reply_text("Напиши 'Почати', щоб розпочати квест.")
         return
-    
-    current_task = QUEST[step - 1]  # тому що після старту step=1 для 0-го завдання
-    
-    text = normalize(message.text)
-    
-    # Перевірка запиту підказки
-    if text in ["підказка", "підсказка", "hint"]:
-        if not user_hints_requested.get(chat_id, False):
-            bot.send_message(chat_id, current_task["hint"])
-            user_hints_requested[chat_id] = True
-        else:
-            bot.send_message(chat_id, "Підказка вже надана. Спробуй відповісти.")
-        return
-    
-    # Перевірка відповіді
-    correct_answer = normalize(current_task["answer"])
-    
-    if text == correct_answer:
-        user_state[chat_id] += 1
-        user_hints_requested[chat_id] = False
-        
-        if user_state[chat_id] >= len(QUEST):
-            bot.send_message(chat_id, "Вітаємо! Ти пройшов увесь квест ‘Код Ейнштейна’!")
-        else:
-            next_task = QUEST[user_state[chat_id]]
-            bot.send_message(chat_id, "Правильно! Ось наступне завдання:\n\n" + next_task["task"])
-    else:
-        bot.send_message(chat_id, "Неправильна відповідь. Спробуй ще раз або напиши 'Підказка' для допомоги.")
 
-if __name__ == "__main__":
+    if step > len(QUEST):
+        await update.message.reply_text("Квест завершено! Дякуємо за участь.")
+        return
+
+    # Перевірка відповіді
+    correct_answer = normalize(QUEST[step-1]["answer"])
+    user_answer = normalize(text)
+
+    if user_answer == correct_answer:
+        # Відповідь правильна
+        if step == len(QUEST):
+            await update.message.reply_text(
+                "Правильно! Ви успішно завершили квест. Вітаємо і дякуємо за участь!"
+            )
+            user_progress[user_id]["step"] = step + 1
+        else:
+            await update.message.reply_text(
+                "Правильно! Наступне завдання:\n\n" + QUEST[step]["task"]
+            )
+            user_progress[user_id]["step"] = step + 1
+            user_progress[user_id]["asked_hint"] = False
+    else:
+        # Неправильна відповідь
+        await update.message.reply_text(
+            "Невірно. Спробуй ще раз або напиши 'Підказка', якщо потрібна допомога."
+        )
+
+
+if __name__ == '__main__':
+    import os
+
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
+    if not BOT_TOKEN:
+        print("Помилка: не встановлено BOT_TOKEN в змінних середовища.")
+        exit(1)
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+
     print("Бот запущено...")
-    bot.polling(none_stop=True)
+    app.run_polling()
