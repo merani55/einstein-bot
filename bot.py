@@ -134,3 +134,15 @@ class QuestBot:
                 await update.message.reply_text("🎉 Ви пройшли весь квест! Вітаємо!")
         else:
             await update
+if __name__ == "__main__":
+    import asyncio
+
+    bot = QuestBot()
+    app = ApplicationBuilder().token("YOUR_BOT_TOKEN").build()
+
+    app.add_handler(CommandHandler("start", bot.start))
+    app.add_handler(CommandHandler("hint", bot.hint))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_answer))
+
+    asyncio.run(app.run_polling())
+
