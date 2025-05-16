@@ -120,7 +120,6 @@ class QuestBot:
     async def handle_answer(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_answer = update.message.text.lower().strip()
         correct_answer = QUEST_POINTS[self.current_point]["answer"].lower()
-        # Нормалізація відповідей: видалити зайві знаки пунктуації
         user_answer_clean = ''.join(c for c in user_answer if c.isalnum() or c.isspace())
         correct_answer_clean = ''.join(c for c in correct_answer if c.isalnum() or c.isspace())
 
@@ -133,16 +132,18 @@ class QuestBot:
             else:
                 await update.message.reply_text("🎉 Ви пройшли весь квест! Вітаємо!")
         else:
-            await update
+            await update.message.reply_text("❌ Невірна відповідь. Спробуйте ще раз або напишіть /hint.")
+
 if __name__ == "__main__":
     import asyncio
 
     bot = QuestBot()
-    app = ApplicationBuilder().token("YOUR_BOT_TOKEN").build()
+    app = ApplicationBuilder().token("YOUR_BOT_TOKEN_HERE").build()
 
     app.add_handler(CommandHandler("start", bot.start))
     app.add_handler(CommandHandler("hint", bot.hint))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_answer))
 
     asyncio.run(app.run_polling())
+
 
